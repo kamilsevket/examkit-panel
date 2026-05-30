@@ -1,0 +1,17 @@
+services:
+  panel:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    restart: unless-stopped
+    environment:
+      - ADMIN_TOKEN=${ADMIN_TOKEN}
+      - DATA_DIR=/data
+      - PORT=3000
+    volumes:
+      - examkit-data:/data
+    expose:
+      - "3000"
+
+volumes:
+  examkit-data:
