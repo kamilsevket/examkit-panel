@@ -1,0 +1,109 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>ExamKit Panel</title>
+<script src="https://cdn.tailwindcss.com"></script>
+</head>
+<body class="bg-slate-950 text-slate-100 min-h-screen">
+<div class="max-w-3xl mx-auto p-6">
+  <header class="flex items-center justify-between mb-6">
+    <h1 class="text-2xl font-bold">ExamKit <span class="text-indigo-400">Panel</span></h1>
+    <span id="status" class="text-xs text-slate-500"></span>
+  </header>
+
+  <div class="bg-slate-900 rounded-xl p-4 mb-6 border border-slate-800">
+    <label class="block text-xs uppercase tracking-wide text-slate-400 mb-1">Admin token</label>
+    <div class="flex gap-2">
+      <input id="token" type="password" placeholder="Bearer token" class="flex-1 bg-slate-800 rounded-lg px-3 py-2 text-sm outline-none" />
+      <button onclick="connect()" class="bg-indigo-600 hover:bg-indigo-500 rounded-lg px-4 py-2 text-sm font-semibold">Connect</button>
+    </div>
+  </div>
+
+  <div id="list" class="space-y-3 mb-8"></div>
+
+  <div class="bg-slate-900 rounded-xl p-4 border border-slate-800">
+    <h2 class="font-semibold mb-3">Upload / replace exam pack</h2>
+    <input id="newid" placeholder="exam id (e.g. us-citizenship)" class="w-full bg-slate-800 rounded-lg px-3 py-2 text-sm mb-2 outline-none" />
+    <input id="file" type="file" accept="application/json" class="text-sm mb-2 block" />
+    <textarea id="json" rows="6" placeholder="…or paste ExamPack JSON" class="w-full bg-slate-800 rounded-lg px-3 py-2 text-xs font-mono mb-2 outline-none"></textarea>
+    <button onclick="upload()" class="bg-emerald-600 hover:bg-emerald-500 rounded-lg px-4 py-2 text-sm font-semibold">Upload</button>
+    <p id="uploadmsg" class="text-xs mt-2 text-slate-400"></p>
+  </div>
+</div>
+
+<script>
+const $ = (id) => document.getElementById(id)
+let TOKEN = localStorage.getItem('ek_token') || ''
+$('token').value = TOKEN
+
+function hdr() { return { 'Authorization': 'Bearer ' + TOKEN, 'Content-Type': 'application/json' } }
+function setStatus(t, ok) { $('status').textContent = t; $('status').className = 'text-xs ' + (ok ? 'text-emerald-400' : 'text-rose-400') }
+
+async function connect() {
+  TOKEN = $('token').value.trim(); localStorage.setItem('ek_token', TOKEN)
+  await load()
+}
+
+$('file').addEventListener('change', async (e) => {
+  const f = e.target.files[0]; if (!f) return
+  $('json').value = await f.text()
+  try { const id = JSON.parse($('json').value).id; if (id && !$('newid').value) $('newid').value = id } catch {}
+})
+
+async function load() {
+  const r = await fetch('/api/exams', { headers: hdr() })
+  if (!r.ok) { setStatus('auth failed (' + r.status + ')', false); $('list').innerHTML = ''; return }
+  setStatus('connected', true)
+  const { exams } = await r.json()
+  $('list').innerHTML = exams.length ? '' : '<p class="text-slate-500 text-sm">No exams yet.</p>'
+  for (const e of exams) $('list').appendChild(row(e))
+}
+
+function row(e) {
+  const div = document.createElement('div')
+  div.className = 'bg-slate-900 rounded-xl p-4 border border-slate-800'
+  div.innerHTML = `
+    <div class="flex items-center justify-between">
+      <div>
+        <div class="font-semibold">${e.title || e.id} <span class="text-slate-500 text-xs">v${e.version ?? '?'}</span></div>
+        <div class="text-xs text-slate-400">${e.id} · ${e.questionCount} Q · ${e.topicCount} topics · ${e.locale || ''}</div>
+      </div>
+      <span class="text-xs px-2 py-1 rounded-full ${e.published ? 'bg-emerald-600/30 text-emerald-300' : 'bg-slate-700 text-slate-300'}">${e.published ? 'published' : 'draft'}</span>
+    </div>
+    <div class="flex flex-wrap gap-2 mt-3 items-center">
+      <button class="text-xs bg-indigo-600 hover:bg-indigo-500 rounded px-3 py-1.5" onclick="togglePub('${e.id}', ${!e.published})">${e.published ? 'Unpublish' : 'Publish'}</button>
+      <input id="price-${e.id}" value="${e.paywall?.priceLabel || ''}" placeholder="price label" class="text-xs bg-slate-800 rounded px-2 py-1.5 w-28 outline-none" />
+      <button class="text-xs bg-slate-700 hover:bg-slate-600 rounded px-3 py-1.5" onclick="savePrice('${e.id}')">Save price</button>
+      <a class="text-xs text-indigo-400 underline" href="/public/exam/${e.id}" target="_blank">public JSON</a>
+      <button class="text-xs text-rose-400 ml-auto" onclick="del('${e.id}')">Delete</button>
+    </div>`
+  return div
+}
+
+async function togglePub(id, pub) {
+  await fetch('/api/meta/' + id, { method: 'PATCH', headers: hdr(), body: JSON.stringify({ published: pub }) })
+  load()
+}
+async function savePrice(id) {
+  await fetch('/api/meta/' + id, { method: 'PATCH', headers: hdr(), body: JSON.stringify({ paywall: { priceLabel: $('price-' + id).value } }) })
+  load()
+}
+async function del(id) {
+  if (!confirm('Delete ' + id + '?')) return
+  await fetch('/api/exam/' + id, { method: 'DELETE', headers: hdr() }); load()
+}
+async function upload() {
+  const id = $('newid').value.trim()
+  let body; try { body = JSON.parse($('json').value) } catch { $('uploadmsg').textContent = 'Invalid JSON'; return }
+  const r = await fetch('/api/exam/' + id, { method: 'PUT', headers: hdr(), body: JSON.stringify(body) })
+  const j = await r.json()
+  $('uploadmsg').textContent = r.ok ? `Uploaded ${j.questions} questions.` : ('Error: ' + JSON.stringify(j.details || j.error))
+  if (r.ok) { $('json').value=''; $('newid').value=''; $('file').value=''; load() }
+}
+
+if (TOKEN) load()
+</script>
+</body>
+</html>

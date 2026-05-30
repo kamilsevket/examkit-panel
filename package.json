@@ -1,0 +1,15 @@
+{
+  "name": "examkit-panel",
+  "version": "1.0.0",
+  "private": true,
+  "type": "module",
+  "description": "Content panel for ExamKit apps — manage & serve exam question banks",
+  "scripts": {
+    "start": "node src/server.js"
+  },
+  "engines": { "node": ">=20" },
+  "dependencies": {
+    "hono": "^4.6.14",
+    "@hono/node-server": "^1.13.7"
+  }
+}
