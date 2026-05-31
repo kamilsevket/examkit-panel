@@ -13,12 +13,15 @@ const PORT = Number(process.env.PORT || 3000)
 
 const PACKS = path.join(DATA_DIR, 'packs')
 const META = path.join(DATA_DIR, 'meta')
-for (const d of [PACKS, META]) { if (!existsSync(d)) await mkdir(d, { recursive: true }) }
+const LEGAL = path.join(DATA_DIR, 'legal')
+for (const d of [PACKS, META, LEGAL]) { if (!existsSync(d)) await mkdir(d, { recursive: true }) }
 
 // ---- storage helpers ----
 const packPath = (id) => path.join(PACKS, `${id}.json`)
 const metaPath = (id) => path.join(META, `${id}.json`)
+const legalPath = (slug, key) => path.join(LEGAL, `${slug}.${key}.html`)
 const safeId = (id) => /^[a-zA-Z0-9._-]{1,64}$/.test(id)
+const LEGAL_KEYS = new Set(['privacy', 'terms'])
 
 async function readJSON(p, fallback = null) {
   try { return JSON.parse(await readFile(p, 'utf8')) } catch { return fallback }
@@ -97,7 +100,40 @@ app.get('/public/config/:id', async (c) => {
   return c.json({ published: true, version: pack?.version ?? 0, paywall: meta.paywall })
 })
 
+// ---- public legal pages (served to App Store + in-app links) ----
+function legalShell(title, bodyHTML) {
+  return `<!doctype html><html lang="en"><head><meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>${title}</title>
+<style>
+  :root { color-scheme: light dark; }
+  body { font: 16px/1.6 -apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif;
+    max-width: 720px; margin: 0 auto; padding: 2.5rem 1.25rem 4rem; color: #1c1c22; }
+  @media (prefers-color-scheme: dark){ body{ background:#0e0f13; color:#e7e8ee; } a{ color:#7aa2ff; } }
+  h1 { font-size: 1.7rem; } h2 { font-size: 1.2rem; margin-top: 2rem; }
+  .meta { color: #8a8d98; font-size: .9rem; margin-bottom: 2rem; }
+</style></head><body>${bodyHTML}</body></html>`
+}
+
+app.get('/public/legal/:slug/:key', async (c) => {
+  const { slug, key } = c.req.param()
+  if (!safeId(slug) || !LEGAL_KEYS.has(key)) return c.text('Not found', 404)
+  let html
+  try { html = await readFile(legalPath(slug, key), 'utf8') } catch { return c.text('Not found', 404) }
+  const title = key === 'privacy' ? 'Privacy Policy' : 'Terms of Use'
+  return c.html(legalShell(title, html))
+})
+
 // ---- admin api ----
+app.put('/api/legal/:slug/:key', async (c) => {
+  const { slug, key } = c.req.param()
+  if (!safeId(slug) || !LEGAL_KEYS.has(key)) return c.json({ error: 'bad slug/key' }, 400)
+  const body = await c.req.text()
+  if (!body || body.length < 20) return c.json({ error: 'empty body' }, 422)
+  await writeFile(legalPath(slug, key), body)
+  return c.json({ ok: true, slug, key, bytes: body.length })
+})
+
 app.get('/api/exams', async (c) => {
   const out = []
   for (const id of await listIDs()) {
